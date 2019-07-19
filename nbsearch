@@ -1,0 +1,105 @@
+#!/usr/bin/perl
+#########################################################################################
+# nbsearch: Script to search Netbackup catalog for client and path location for restore.#
+#	    Useful when environment has DFS and end user paths are not same as restore. #
+# written: Benjamin Schmaus                                                             #
+# date: 070108   updated: 050509                                                        #
+#########################################################################################
+use Getopt::Long;
+use POSIX qw(mktime strftime);
+options();
+sixtydaysfromnow();
+chomp ($search);
+$searchfix = '"' . $search . '"';
+if ($type eq "UNIX") {
+	$tpn = 0;
+} elsif ($type eq "WINDOWS") {
+	$tpn = 13;
+} elsif ($type eq "NDMP") {
+	$tpn = 19;
+} else {
+	$tpn = 0;
+}
+$date=`/usr/bin/date +%m/%d/%y-%H:%M:%S`;
+print "Start Time: $date";
+if ($hostname) {
+	if ($type eq "UNIX") {
+		$tpn = 0;
+	} elsif ($type eq "WINDOWS") {
+		$tpn = 13;
+	} elsif ($type eq "NDMP") {
+		$tpn = 19;
+	} else {
+		$tpn = 0;
+	}
+	print "Searching hostname: $hostname\n";
+	print "Backup Type: $tpn\n";
+	print "Search back to: $pmon/$pmday/$pyear\n";
+	print "Searching for: $searchfix\n";
+	print "\n";
+	@results = `/usr/openv/netbackup/bin/bplist -C $hostname -b -l -t $tpn -s $pmon/$pmday/$pyear -I -PI -R $searchfix 2>/dev/null`;
+	foreach (@results) {
+		print "$_";
+	}
+        $date=`/usr/bin/date +%m/%d/%y-%H:%M:%S`;
+        print "\nFinish Time: $date";
+	print "Search is completed\n";
+} else {
+	print "Searching clients, please wait......";
+	open DATA, "/usr/openv/netbackup/bin/admincmd/bpplclients -allunique -noheader|";
+	while (<DATA>) {
+		chomp();
+		($hardware,$os,$client) = split();
+		$results = `/usr/openv/netbackup/bin/bplist -C $client -b -l -t $tpn -s $pmon/$pmday/$pyear -I -PI -R $searchfix 2>/dev/null`;
+		$status = `/usr/bin/echo $?`;
+		print ".";
+		chomp($status);
+		if (($status eq "0") && ($results ne "")) {
+			print "\n\n";
+			print "Client: $client\n";
+			print "$results\n";
+			print "Stop searching (y)? ";
+			$answer =  <STDIN>;
+			chomp($answer);
+			if (($answer eq "y") || ($answer eq "Y")) {
+				$date=`/usr/bin/date +%m/%d/%y-%H:%M:%S`;
+				print "Finish Time: $date\n";
+				exit;
+			}
+			print "\nContinuing searching...";
+		}
+	}
+	close(DATA); 
+}
+exit;
+
+sub options {
+        $help="";
+        $search="" ;
+        GetOptions ('h|help'=>\$help,'s|search=s'=>\$search,'h|hostname=s'=>\$hostname,'t|type=s'=>\$type);
+        if ($help) {
+                print "Usage: nbsearch [-h <hostname to search>] -t <WINDOWS|NDMP|UNIX> -s <search pattern>\n";
+                exit;
+        }
+        if ($search eq "") {
+                print "Usage: nbsearch [-h <hostname to search>] -t <WINDOWS|NDMP|UNIX> -s <search pattern>\n";
+                exit;
+        }
+	
+        if (($type eq "") || (($type ne "WINDOWS") && ($type ne "UNIX") && ($type ne "NDMP"))) {
+                print "Usage: nbsearch [-h <hostname to search>] -t <WINDOWS|NDMP|UNIX> -s <search pattern>\n";
+                exit;
+        }
+	if (($type eq "") && ($hostname)) {
+		print "Usage: nbsearch [-h <hostname to search>] -t <WINDOWS|NDMP|UNIX> -s <search pattern>\n";
+		exit;
+	}
+}
+
+sub sixtydaysfromnow {
+	@past = localtime();
+	$past[3] -= 30;
+	($psec,$pmin,$phour,$pmday,$pmon,$pyear,$pwday,$pyday,$pisdst) = localtime(mktime(@past));
+	$pyear = "0". ($pyear - 100);
+	$pmon = $pmon + 1;
+}

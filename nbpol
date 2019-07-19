@@ -1,0 +1,137 @@
+#!/usr/bin/perl
+#########################################################################################
+# nbpol: Script to determine which policies will run on a given day when policies	#
+#	 are calendar based.								#
+# written: Benjamin Schmaus 								#
+# date: 070108										#
+#########################################################################################
+use DateTime;
+use Getopt::Long;
+use CGI;
+use Time::Local;
+use POSIX qw(strftime);
+$first = "0";$last = "0";
+$schd1 = "SCHED ";$schd2 = "SCHED";
+$counter = "0";
+$hour = "0";$minute = "0";$second = "0";
+$arraycount = 0;
+@gac = 0;
+options();
+@policies = `/usr/openv/netbackup/bin/admincmd/bppllist -l`;
+datetime2();
+printf "%-30s %-20s %-15s %-15s\n","Policy","Schedule","Start Time","Duration";
+printf "%-30s %-20s %-15s %-15s\n","------","--------","----------","--------";
+foreach $policies (@policies) {
+	$counter = 0;
+	chomp($policies);
+	open DATA, "/usr/openv/netbackup/bin/admincmd/bpplsched $policies -l|";
+	while (<DATA>) {
+		$line = $_;
+		chomp($line);
+		if ($line =~ /$schd1/ && $first eq "0") { first(); }
+		if ($line =~ /$schd2/ && $first eq "1") { checks(); }
+	}
+	close DATA;
+	for ($out = 0; $out < $counter; $out++) {
+		$policies =~ s/\s*$//g;
+		if ($schedcaldayoweek[$out] =~ /$datum/) {
+			parseit();
+			if ($windowl > 0) {
+				if (($time eq "am") && ($starttime < 12)) {
+					printf "%-30s %-20s %-15s %-15s\n",$policies,$schedule2,$starttime,$windowl;
+					$gac[int($starttime)] = $gac[int($starttime)] + 1;
+				} elsif (($time eq "pm") && ($starttime > 11.99)) {
+					printf "%-30s %-20s %-15s %-15s\n",$policies,$schedule2,$starttime,$windowl;
+					$gac[int($starttime)] = $gac[int($starttime)] + 1;
+				} elsif ($time eq "all") {
+					printf "%-30s %-20s %-15s %-15s\n",$policies,$schedule2,$starttime,$windowl;
+					$gac[int($starttime)] = $gac[int($starttime)] + 1;
+				}
+			}
+		}
+	}
+}
+if ($graph = "1") {
+	graphit();
+}
+exit; 
+
+sub graphit {
+	print "\n\n";
+	print "Hr\tNumber of Jobs\n";
+	print "--\t---------------\n";
+	for ($loop = 0; $loop < 24; $loop++) {
+		print "$loop\t";
+		for ($loop2 = 0; $loop2 < $gac[$loop]; $loop2++) {
+			print "*";
+		}
+		print "\n";
+	}
+}
+
+sub options {
+	$help="";$year="" ;$month="";$day="";$time="";$graph="";
+	GetOptions ('h|help'=>\$help,'y|year=s'=>\$year,'m|month=s'=>\$month,'d|day=s'=>\$day,'t|time=s'=>\$time,'graph'=>\$graph);
+	if ($help) {
+		print "Usage: nbpol -y <year> -m <month> -d <day> -t <am|pm|all> [ -graph ]\n";
+		exit;
+	}
+	if (($year eq "") || ($month eq "") || ($day eq "") || ($time eq "")) {
+		print "Usage: nbpol -y <year> -m <month> -d <day> -t <am|pm|all> [ -graph ]\n";
+		exit;
+	}
+}
+
+sub parseit {
+	$field2 = ($dow*2);
+	$field1 = ($dow*2)-1;
+	@schedtmp = split(/[ \t]+/,$schedule[$out]);
+	$schedule2 = $schedtmp[1];
+	@schedwintmp = split(/[ \t]+/,$schedwin[$out]);
+	$starttime = ($schedwintmp[$field1]/(60*60));
+	$starttime =~ s/(^\d{1,}\.\d{2})(.*$)/$1/;
+	$windowl = ($schedwintmp[$field2]/(60*60)); 
+	$windowl =~s/(^\d{1,}\.\d{2})(.*$)/$1/;
+}
+
+sub datetime2 {
+	$dt = DateTime->new(year=>$year, month=>$month,day=>$day,hour=>$hour,minute=>$minute,second=>$second,nanosecond=>00,time_zone=>'America/Chicago',);
+	print "$dt\n";
+	$dow = $dt->day_of_week;    		##### 1-7 (Monday is 1) - also dow, wday
+	$wod = $dt->weekday_of_month();		##### 1-5 weeks
+	if ($dow eq "7") { $dow = "1"; } else { $dow = $dow +1; }
+	$datum = "$dow,$wod";
+	chomp($datum);
+}
+
+
+sub first {
+	$first = "1";
+	$schedule[$counter] = "$line";
+}
+
+sub checks {
+	if ($line =~ /SCHEDCALENDAR/) {
+		$schedcalendar[$counter] = "SCHEDCALENDAR enabled";
+	}
+        if ($line =~ /SCHEDCALDAYOWEEK/) {
+                $schedcaldayoweek[$counter] = "$line";
+        }
+        if ($line =~ /SCHEDWIN/) {
+                $schedwin[$counter] = "$line";
+        }
+        if ($line =~ /SCHEDRES/) {
+                $schedres[$counter] = "$line";
+        }
+        if ($line =~ /SCHEDPOOL/) {
+                $schedpool[$counter] = "$line";
+        }
+        if ($line =~ /SCHEDRL/) {
+                $schedrl[$counter] = "$line";
+        }
+        if ($line =~ /SCHEDFOE/) {
+                $schedfoe[$counter] = "$line";
+		$first = "0";
+		$counter = $counter+1;
+        }
+}
